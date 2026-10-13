@@ -1,0 +1,77 @@
+name: socialnetwork
+
+services:
+  postgres:
+    image: postgres:17.11-alpine3.24
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-socialnetwork}
+      POSTGRES_USER: ${POSTGRES_USER:-socialnetwork}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-socialnetwork}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:8.2.10-alpine3.22
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./backend
+    image: socialnetwork/api:local
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${POSTGRES_DB:-socialnetwork};Username=${POSTGRES_USER:-socialnetwork};Password=${POSTGRES_PASSWORD:-socialnetwork}
+      ConnectionStrings__Redis: redis:6379
+      Jwt__Secret: ${JWT_SECRET:?JWT_SECRET is required, see .env.example}
+      SeedAdmin__Email: ${SEED_ADMIN_EMAIL:-admin@socialnetwork.local}
+      SeedAdmin__Password: ${SEED_ADMIN_PASSWORD:-Admin12345!}
+      Cors__Origins__0: http://localhost:${FRONTEND_PORT:-3000}
+    ports:
+      - "${API_PORT:-8080}:8080"
+
+  frontend:
+    build: ./frontend
+    image: socialnetwork/frontend:local
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      API_INTERNAL_URL: http://api:8080
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+
+  adminer:
+    image: adminer:latest
+    restart: unless-stopped
+    profiles: ["tools"]
+    depends_on:
+      - postgres
+    ports:
+      - "${ADMINER_PORT:-8081}:8080"
+
+volumes:
+  postgres-data:
+  redis-data:
